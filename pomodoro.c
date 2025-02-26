@@ -3,17 +3,13 @@
 #include "hardware/timer.h"
 #include "hardware/i2c.h"
 #include "hardware/adc.h"
-#include "hardware/pwm.h"
 #include "inc/ssd1306.h"
 
 // Definição de constantes
-#define A_BUTTON 5
 #define B_BUTTON 6
-#define LED_RED 13
-#define LED_BLUE 12
-#define LED_GREEN 11
-#define JOYSTICK_BUTTON 22
 #define JOYSTICK_X 26
+#define A_BUZZER 21
+#define B_BUZZER 10
 
 #define I2C_PORT i2c1
 #define I2C_SDA 14
@@ -27,11 +23,12 @@ uint32_t last_time;
 
 volatile bool cor = true;
 volatile bool active = false;
+volatile bool sound = false;
 
 // Predefinições de tempo que poderão ser escolhidas no programa
 static uint8_t cycles[] = { 2, 3, 4, 5 };
-static uint8_t work_time[] = { 20, 25, 30, 40, 50, 60 };
-static uint8_t break_time[] = { 5, 10, 15 };
+static uint8_t work_time[] = { 2, 25, 30, 40, 50, 60 };
+static uint8_t break_time[] = { 1, 10, 15 };
 
 // Variáveis utilizadas para salvar as configurações escolhidas pelo usuário
 uint8_t ind_cycles, ind_work, ind_break;
@@ -44,19 +41,18 @@ uint8_t work_minutes, break_minutes, cycles_remaining;
 // Protótipo das Funções
 void setup(void);
 static void gpio_irq_handler(uint gpio, uint32_t events);
-uint pwm_init_gpio(uint gpio, uint wrap);
 int map(int valor, int center, int in_min, int in_max, int out_min, int out_max);
 void setup_menu(ssd1306_t ssd);
 bool minute_timer_callback(struct repeating_timer *t);
+void nota(uint32_t frequencia, uint32_t tempo_ms);
+void timer_sound();
 
 int main()
 {
     setup(); // Configuração das portas digitais
 
-    // Habilitando interrupção da gpio no botão do Joystick, no botão A e botão B.
-    gpio_set_irq_enabled_with_callback(JOYSTICK_BUTTON, GPIO_IRQ_EDGE_FALL, 1, & gpio_irq_handler);
-    gpio_set_irq_enabled(A_BUTTON, GPIO_IRQ_EDGE_FALL, true);
-    gpio_set_irq_enabled(B_BUTTON, GPIO_IRQ_EDGE_FALL, true);
+    // Habilitando interrupção da gpio no botão B.
+    gpio_set_irq_enabled_with_callback(B_BUTTON, GPIO_IRQ_EDGE_FALL, 1, & gpio_irq_handler);
 
     // Configuração inicial do display ssd1306, iniciado com todos os pixels apagados.
     ssd1306_t ssd; 
@@ -88,18 +84,21 @@ int main()
             // Temporizador em atividade
             while (active) {
                 sprintf(str_ciclos, "Restam %d ciclos", cycles_remaining);
-                sprintf(str_work, "Tempo %d/%d", work_minutes, work_time[ind_work]);
-                sprintf(str_break, "Intervalo %d/%d", break_minutes, break_time[ind_break]);
+                sprintf(str_work, "  Tempo   %d %d", work_minutes, work_time[ind_work]);
+                sprintf(str_break, "Intervalo %d %d", break_minutes, break_time[ind_break]);
                 ssd1306_fill(&ssd, !cor); // Limpa o display
                 ssd1306_rect(&ssd, 3, 3, 124, 60, cor, !cor); // Desenha um retângulo
                 ssd1306_draw_string(&ssd, str_ciclos, 6, 10); // Desenha uma string
                 ssd1306_draw_string(&ssd, str_work, 6, 28); // Desenha uma string
                 ssd1306_draw_string(&ssd, str_break, 6, 46); // Desenha uma string
                 ssd1306_send_data(&ssd); // Atualiza o display
-            }
-        }
 
-            
+                if (sound) {
+                    timer_sound();
+                    sound = false;
+                }
+            }
+        }   
     }
 
     return 0;
@@ -110,16 +109,6 @@ void setup(void)
 {
     stdio_init_all();
 
-    gpio_init(LED_RED);         // Inicializando LED vermelho.
-    gpio_set_dir(LED_RED, GPIO_OUT);
-
-    gpio_init(LED_GREEN);       // Inicializando LED verde.
-    gpio_set_dir(LED_GREEN, GPIO_OUT);
-
-    gpio_init(A_BUTTON);        // Inicializando Botão A.
-    gpio_set_dir(A_BUTTON, GPIO_IN);
-    gpio_pull_up(A_BUTTON);
-
     gpio_init(B_BUTTON);        // Inicializando Botão B.
     gpio_set_dir(B_BUTTON, GPIO_IN);
     gpio_pull_up(B_BUTTON);
@@ -127,9 +116,11 @@ void setup(void)
     adc_init();                 // Inicializar o ADC
     adc_gpio_init(JOYSTICK_X);  // Configurar GPIO para eixo X
 
-    gpio_init(JOYSTICK_BUTTON); // Inicializando o Botão do joystick
-    gpio_set_dir(JOYSTICK_BUTTON, GPIO_IN);
-    gpio_pull_up(JOYSTICK_BUTTON);
+    gpio_init(A_BUZZER); // Inicializa o pino do buzzer A
+    gpio_set_dir(A_BUZZER, GPIO_OUT);
+
+    gpio_init(B_BUZZER); // Inicializa o pino do buzzer B
+    gpio_set_dir(B_BUZZER, GPIO_OUT);
 
     // Inicialização do I2C em 400Khz.
     i2c_init(I2C_PORT, 400 * 1000);
@@ -138,7 +129,6 @@ void setup(void)
     gpio_set_function(I2C_SCL, GPIO_FUNC_I2C); // Configura o pino GPIO para I2C
     gpio_pull_up(I2C_SDA);
     gpio_pull_up(I2C_SCL);
-
 }
 
 // Rotina da Interrupção
@@ -150,8 +140,6 @@ static void gpio_irq_handler(uint gpio, uint32_t events){
         last_time = current_time;
 
         switch (gpio) {
-        case A_BUTTON: 
-            break;
 
         case B_BUTTON:
             if (!active) {
@@ -174,24 +162,11 @@ static void gpio_irq_handler(uint gpio, uint32_t events){
                 }
             }
             break;
-
-        case JOYSTICK_BUTTON:
-            break;
         
         default:
             break;
         }
     }
-}
-
-uint pwm_init_gpio(uint gpio, uint wrap) {
-    gpio_set_function(gpio, GPIO_FUNC_PWM);
-
-    uint slice_num = pwm_gpio_to_slice_num(gpio);
-    pwm_set_wrap(slice_num, wrap);
-    
-    pwm_set_enabled(slice_num, true);  
-    return slice_num;  
 }
 
 // Função para converter proporcionalmente os valores do adc para o display
@@ -278,10 +253,9 @@ void setup_menu(ssd1306_t ssd) {
             ssd1306_send_data(&ssd); 
         }
 
-        sleep_ms(100);
+        sleep_ms(200);
 
         if (selected_config == 3) {
-            // Iniciar o programa com as configurações predefinidas
             active = true;
             break;
         }
@@ -300,6 +274,8 @@ bool minute_timer_callback(struct repeating_timer *t) {
         if (!break_minutes) {
             work_minutes = 0;
 
+            sound = true;
+
             // Contabiliza um ciclo e caso seja o último, reseta o programa.
             if (!--cycles_remaining) {
                 active = false;
@@ -314,8 +290,32 @@ bool minute_timer_callback(struct repeating_timer *t) {
     // Se passou o tempo de um ciclo, ativar a pausa
     if (work_minutes == work_time[ind_work]) {
         break_minutes = break_time[ind_break];
+        sound = true;
     }
 
     // Retorna true para manter o temporizador repetindo. Se retornar false, o temporizador para.
     return true;
+}
+
+void nota(uint32_t frequencia, uint32_t tempo_ms) {
+    uint32_t delay = 1000000 / (frequencia * 2);  // Calcula o tempo de atraso em microssegundos para gerar a onda quadrada
+    uint32_t ciclo = frequencia * tempo_ms / 1000;  // Calcula o número de ciclos necessários para a duração desejada
+
+    // Loop para gerar a onda quadrada no buzzer
+    for (uint32_t i = 0; i < ciclo; i++) {
+        gpio_put(A_BUZZER, 1); // Liga o buzzer
+        gpio_put(B_BUZZER, 1); // Liga o buzzer
+        sleep_us(delay); // Espera pelo tempo de atraso calculado
+        gpio_put(A_BUZZER, 0); // Desliga o buzzer
+        gpio_put(B_BUZZER, 0); // Desliga o buzzer
+        sleep_us(delay); // Espera novamente pelo tempo de atraso para completar o ciclo
+    }
+}
+
+void timer_sound() {
+    nota(132, 200);
+    sleep_ms(100);
+    nota(165, 200);
+    sleep_ms(100);
+    nota(247, 200);
 }
