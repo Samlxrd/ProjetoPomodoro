@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
+#include "hardware/timer.h"
 #include "hardware/i2c.h"
 #include "hardware/adc.h"
 #include "hardware/pwm.h"
@@ -37,12 +38,16 @@ uint8_t ind_cycles, ind_work, ind_break;
 uint8_t selected_config;
 uint8_t indice;
 
+// Variáveis para o temporizador
+uint8_t work_minutes, break_minutes, cycles_remaining;
+
 // Protótipo das Funções
 void setup(void);
 static void gpio_irq_handler(uint gpio, uint32_t events);
 uint pwm_init_gpio(uint gpio, uint wrap);
 int map(int valor, int center, int in_min, int in_max, int out_min, int out_max);
 void setup_menu(ssd1306_t ssd);
+bool minute_timer_callback(struct repeating_timer *t);
 
 int main()
 {
@@ -60,6 +65,10 @@ int main()
     ssd1306_send_data(&ssd);
     ssd1306_fill(&ssd, false);
     ssd1306_send_data(&ssd);
+
+    char str_ciclos[20];
+    char str_work[20];
+    char str_break[20];
     
     while(true) {
         // Se o temporizador não estiver ativo, o usuário poderá selecionar as configurações de tempo desejadas.
@@ -69,13 +78,27 @@ int main()
             setup_menu(ssd);
         }
 
-        // Temporizador em atividade
-        while (active) {
-            ssd1306_fill(&ssd, !cor); // Limpa o display
-            ssd1306_rect(&ssd, 3, 3, 124, 60, cor, !cor); // Desenha um retângulo
-            ssd1306_draw_string(&ssd, "ATIVO", 40, 10); // Desenha uma string
-            ssd1306_send_data(&ssd); // Atualiza o display
+        else {
+            struct repeating_timer timer;
+
+            // Configura o temporizador para chamar a função de callback a cada minuto.
+            add_repeating_timer_ms(60000, minute_timer_callback, NULL, &timer);
+            cycles_remaining = cycles[ind_cycles];
+
+            // Temporizador em atividade
+            while (active) {
+                sprintf(str_ciclos, "Restam %d ciclos", cycles_remaining);
+                sprintf(str_work, "Tempo %d/%d", work_minutes, work_time[ind_work]);
+                sprintf(str_break, "Intervalo %d/%d", break_minutes, break_time[ind_break]);
+                ssd1306_fill(&ssd, !cor); // Limpa o display
+                ssd1306_rect(&ssd, 3, 3, 124, 60, cor, !cor); // Desenha um retângulo
+                ssd1306_draw_string(&ssd, str_ciclos, 6, 10); // Desenha uma string
+                ssd1306_draw_string(&ssd, str_work, 6, 28); // Desenha uma string
+                ssd1306_draw_string(&ssd, str_break, 6, 46); // Desenha uma string
+                ssd1306_send_data(&ssd); // Atualiza o display
+            }
         }
+
             
     }
 
@@ -199,12 +222,12 @@ void setup_menu(ssd1306_t ssd) {
 
             sleep_ms(100);
 
-            sprintf(value, "%d", cycles[indice]);  // Converte o inteiro em string
-            ssd1306_fill(&ssd, !cor); // Limpa o display
-            ssd1306_rect(&ssd, 3, 3, 124, 60, cor, !cor); // Desenha um retângulo
-            ssd1306_draw_string(&ssd, "Ciclos", 40, 10); // Desenha uma string
-            ssd1306_draw_string(&ssd, value, 60, 30); // Desenha uma string
-            ssd1306_send_data(&ssd); // Atualiza o display
+            sprintf(value, "%d", cycles[indice]);
+            ssd1306_fill(&ssd, !cor);
+            ssd1306_rect(&ssd, 3, 3, 124, 60, cor, !cor);
+            ssd1306_draw_string(&ssd, "Ciclos", 40, 10);
+            ssd1306_draw_string(&ssd, value, 60, 30);
+            ssd1306_send_data(&ssd);
         }
 
         if (selected_config == 1) {
@@ -223,12 +246,12 @@ void setup_menu(ssd1306_t ssd) {
 
             sleep_ms(100);
 
-            sprintf(value, "%d", work_time[indice]);  // Converte o inteiro em string
-            ssd1306_fill(&ssd, !cor); // Limpa o display
-            ssd1306_rect(&ssd, 3, 3, 124, 60, cor, !cor); // Desenha um retângulo
-            ssd1306_draw_string(&ssd, "Tempo", 44, 10); // Desenha uma string
-            ssd1306_draw_string(&ssd, value, 56, 30); // Desenha uma string
-            ssd1306_send_data(&ssd); // Atualiza o display
+            sprintf(value, "%d", work_time[indice]);
+            ssd1306_fill(&ssd, !cor);
+            ssd1306_rect(&ssd, 3, 3, 124, 60, cor, !cor);
+            ssd1306_draw_string(&ssd, "Tempo", 44, 10);
+            ssd1306_draw_string(&ssd, value, 56, 30);
+            ssd1306_send_data(&ssd); 
         }
     
         if (selected_config == 2) {
@@ -247,12 +270,12 @@ void setup_menu(ssd1306_t ssd) {
 
             sleep_ms(100);
 
-            sprintf(value, "%d", break_time[indice]);  // Converte o inteiro em string
-            ssd1306_fill(&ssd, !cor); // Limpa o display
-            ssd1306_rect(&ssd, 3, 3, 124, 60, cor, !cor); // Desenha um retângulo
-            ssd1306_draw_string(&ssd, "Pausa", 44, 10); // Desenha uma string
-            ssd1306_draw_string(&ssd, value, 60, 30); // Desenha uma string
-            ssd1306_send_data(&ssd); // Atualiza o display
+            sprintf(value, "%d", break_time[indice]);
+            ssd1306_fill(&ssd, !cor);
+            ssd1306_rect(&ssd, 3, 3, 124, 60, cor, !cor);
+            ssd1306_draw_string(&ssd, "Pausa", 44, 10);
+            ssd1306_draw_string(&ssd, value, 60, 30);
+            ssd1306_send_data(&ssd); 
         }
 
         sleep_ms(100);
@@ -263,4 +286,36 @@ void setup_menu(ssd1306_t ssd) {
             break;
         }
     }
+}
+
+bool minute_timer_callback(struct repeating_timer *t) {
+    if (!cycles_remaining) {
+        active = false;
+        return false;
+    }
+    
+    if (break_minutes) {
+        break_minutes -= 1;
+
+        if (!break_minutes) {
+            work_minutes = 0;
+
+            // Contabiliza um ciclo e caso seja o último, reseta o programa.
+            if (!--cycles_remaining) {
+                active = false;
+                return false;
+            }
+        }
+        return true;
+    }
+
+    work_minutes += 1;
+
+    // Se passou o tempo de um ciclo, ativar a pausa
+    if (work_minutes == work_time[ind_work]) {
+        break_minutes = break_time[ind_break];
+    }
+
+    // Retorna true para manter o temporizador repetindo. Se retornar false, o temporizador para.
+    return true;
 }
