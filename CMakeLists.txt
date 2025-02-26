@@ -45,7 +45,7 @@ pico_enable_stdio_uart(pomodoro 0)
 pico_enable_stdio_usb(pomodoro 0)
 
 # Add the standard library to the build
-target_link_libraries(pomodoro pico_stdlib hardware_i2c hardware_adc hardware_pwm)
+target_link_libraries(pomodoro pico_stdlib hardware_i2c hardware_adc hardware_pwm hardware_timer)
 
 # Add the standard include files to the build
 target_include_directories(pomodoro PRIVATE
