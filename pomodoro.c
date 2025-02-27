@@ -27,8 +27,8 @@ volatile bool sound = false;
 
 // Predefinições de tempo que poderão ser escolhidas no programa
 static uint8_t cycles[] = { 2, 3, 4, 5 };
-static uint8_t work_time[] = { 2, 25, 30, 40, 50, 60 };
-static uint8_t break_time[] = { 1, 10, 15 };
+static uint8_t work_time[] = { 20, 25, 30, 40, 50, 60 };
+static uint8_t break_time[] = { 5, 10, 15 };
 
 // Variáveis utilizadas para salvar as configurações escolhidas pelo usuário
 uint8_t ind_cycles, ind_work, ind_break;
@@ -41,7 +41,6 @@ uint8_t work_minutes, break_minutes, cycles_remaining;
 // Protótipo das Funções
 void setup(void);
 static void gpio_irq_handler(uint gpio, uint32_t events);
-int map(int valor, int center, int in_min, int in_max, int out_min, int out_max);
 void setup_menu(ssd1306_t ssd);
 bool minute_timer_callback(struct repeating_timer *t);
 void nota(uint32_t frequencia, uint32_t tempo_ms);
@@ -62,6 +61,7 @@ int main()
     ssd1306_fill(&ssd, false);
     ssd1306_send_data(&ssd);
 
+    // Variáveis para armazenar os textos do display
     char str_ciclos[20];
     char str_work[20];
     char str_break[20];
@@ -79,6 +79,8 @@ int main()
 
             // Configura o temporizador para chamar a função de callback a cada minuto.
             add_repeating_timer_ms(60000, minute_timer_callback, NULL, &timer);
+
+            // Define a quantidade de ciclos
             cycles_remaining = cycles[ind_cycles];
 
             // Temporizador em atividade
@@ -86,13 +88,14 @@ int main()
                 sprintf(str_ciclos, "Restam %d ciclos", cycles_remaining);
                 sprintf(str_work, "  Tempo   %d %d", work_minutes, work_time[ind_work]);
                 sprintf(str_break, "Intervalo %d %d", break_minutes, break_time[ind_break]);
-                ssd1306_fill(&ssd, !cor); // Limpa o display
-                ssd1306_rect(&ssd, 3, 3, 124, 60, cor, !cor); // Desenha um retângulo
-                ssd1306_draw_string(&ssd, str_ciclos, 6, 10); // Desenha uma string
-                ssd1306_draw_string(&ssd, str_work, 6, 28); // Desenha uma string
-                ssd1306_draw_string(&ssd, str_break, 6, 46); // Desenha uma string
-                ssd1306_send_data(&ssd); // Atualiza o display
+                ssd1306_fill(&ssd, !cor);
+                ssd1306_rect(&ssd, 3, 3, 124, 60, cor, !cor);
+                ssd1306_draw_string(&ssd, str_ciclos, 6, 10);
+                ssd1306_draw_string(&ssd, str_work, 6, 28);
+                ssd1306_draw_string(&ssd, str_break, 6, 46);
+                ssd1306_send_data(&ssd);
 
+                // Se a flag de emitir som for ativa, emite o som e desliga a flag
                 if (sound) {
                     timer_sound();
                     sound = false;
@@ -144,17 +147,17 @@ static void gpio_irq_handler(uint gpio, uint32_t events){
         case B_BUTTON:
             if (!active) {
                 switch (selected_config) {
-                    case 0:
+                    case 0: // Salva o índice da quantidade de ciclos selecionada
                         ind_cycles = indice;
                         indice = 0;
                         selected_config += 1;
                         break;
-                    case 1:
+                    case 1: // Salva o índice dos minutos de trabalho selecionado
                         ind_work = indice;
                         indice = 0;
                         selected_config += 1;
                         break;
-                    case 2:
+                    case 2: // Salva o índice da dos minutos de intervalo selecionado
                         ind_break = indice;
                         indice = 0;
                         selected_config += 1;
@@ -169,18 +172,13 @@ static void gpio_irq_handler(uint gpio, uint32_t events){
     }
 }
 
-// Função para converter proporcionalmente os valores do adc para o display
-int map(int value, int center, int min, int max, int out_min, int out_max) {
-    return ((value - center) * (out_max - out_min) / (max - min)) + (out_min + out_max) / 2;
-}
-
 void setup_menu(ssd1306_t ssd) {
     char value[3];
-
     uint16_t adc_value_x;
 
     while(true)
     {
+        // Seleção da configuração 1: quantidade de clicos
         if (!selected_config) {
             adc_select_input(1);
             adc_value_x = adc_read();
@@ -205,6 +203,7 @@ void setup_menu(ssd1306_t ssd) {
             ssd1306_send_data(&ssd);
         }
 
+        // Seleção da configuração 2: Minutos de trabalho
         if (selected_config == 1) {
             adc_select_input(1);
             adc_value_x = adc_read();
@@ -228,7 +227,8 @@ void setup_menu(ssd1306_t ssd) {
             ssd1306_draw_string(&ssd, value, 56, 30);
             ssd1306_send_data(&ssd); 
         }
-    
+        
+        // Seleção da configuração 3: Minutos de intervalo
         if (selected_config == 2) {
             adc_select_input(1);
             adc_value_x = adc_read();
@@ -255,6 +255,7 @@ void setup_menu(ssd1306_t ssd) {
 
         sleep_ms(200);
 
+        // Após selecionar as 3 configurações, inicia o temporizador
         if (selected_config == 3) {
             active = true;
             break;
@@ -263,14 +264,17 @@ void setup_menu(ssd1306_t ssd) {
 }
 
 bool minute_timer_callback(struct repeating_timer *t) {
+    // Se não houver mais ciclos, o programa volta ao menu inicial
     if (!cycles_remaining) {
         active = false;
         return false;
     }
     
+    // Verifica se está em um intervalo
     if (break_minutes) {
         break_minutes -= 1;
 
+        // Se acabou o intervalo, reseta o tempo de trabalho e ativa a flag de emitir som
         if (!break_minutes) {
             work_minutes = 0;
 
@@ -287,7 +291,7 @@ bool minute_timer_callback(struct repeating_timer *t) {
 
     work_minutes += 1;
 
-    // Se passou o tempo de um ciclo, ativar a pausa
+    // Se passou o tempo de um ciclo, ativa o intervalo e a flag de emitir som
     if (work_minutes == work_time[ind_work]) {
         break_minutes = break_time[ind_break];
         sound = true;
@@ -303,15 +307,16 @@ void nota(uint32_t frequencia, uint32_t tempo_ms) {
 
     // Loop para gerar a onda quadrada no buzzer
     for (uint32_t i = 0; i < ciclo; i++) {
-        gpio_put(A_BUZZER, 1); // Liga o buzzer
-        gpio_put(B_BUZZER, 1); // Liga o buzzer
-        sleep_us(delay); // Espera pelo tempo de atraso calculado
-        gpio_put(A_BUZZER, 0); // Desliga o buzzer
-        gpio_put(B_BUZZER, 0); // Desliga o buzzer
+        gpio_put(A_BUZZER, 1);
+        gpio_put(B_BUZZER, 1);
+        sleep_us(delay);
+        gpio_put(A_BUZZER, 0);
+        gpio_put(B_BUZZER, 0);
         sleep_us(delay); // Espera novamente pelo tempo de atraso para completar o ciclo
     }
 }
 
+// Efeito sonoro de 3 beeps
 void timer_sound() {
     nota(132, 200);
     sleep_ms(100);
